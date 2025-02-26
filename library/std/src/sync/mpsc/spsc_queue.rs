@@ -17,6 +17,17 @@ use crate::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 use super::cache_aligned::CacheAligned;
 
+        fn print_cap<T>(ptr: *const T) {
+            unsafe {
+                dbg!(ptr);
+
+                let cap_ptr = core::mem::transmute::<&*const T, *const u128>(&ptr);
+
+                dbg!(cap_ptr);
+                eprintln!("[ARTHUR] print_cap: {:#035x}", *cap_ptr);
+            }
+        }
+
 // Node within the linked list queue of messages to send
 struct Node<T> {
     // FIXME: this could be an uninitialized T if we're careful enough, and
@@ -60,6 +71,30 @@ unsafe impl<T: Send, P: Send + Sync, C: Send + Sync> Sync for Queue<T, P, C> {}
 
 impl<T> Node<T> {
     fn new() -> *mut Node<T> {
+        unsafe {
+
+            dbg!();
+            let mut unsafe_cell = UnsafeCell::new(ptr::null_mut::<Node<T>>());
+
+            dbg!();
+            let ptr = unsafe_cell.get();
+
+            dbg!();
+            print_cap(ptr);
+            dbg!();
+            print_cap(*ptr);
+
+            dbg!();
+            let ptr = unsafe_cell.get_mut();
+
+            dbg!();
+            print_cap(ptr as *mut *mut Node<T>);
+            dbg!();
+            print_cap(*ptr);
+
+        }
+            
+        dbg!();
         Box::into_raw(box Node {
             value: None,
             cached: false,
@@ -127,17 +162,38 @@ impl<T, ProducerAddition, ConsumerAddition> Queue<T, ProducerAddition, ConsumerA
             // Acquire a node (which either uses a cached one or allocates a new
             // one), and then append this to the 'head' node.
             let n = self.alloc();
+
+            dbg!();
+
+            print_cap(n);
+            print_cap(ptr::null_mut::<Node<T>>());
+            
+            dbg!();
             assert!((*n).value.is_none());
+            dbg!();
             (*n).value = Some(t);
+            dbg!();
             (*n).next.store(ptr::null_mut(), Ordering::Relaxed);
-            (**self.producer.head.get()).next.store(n, Ordering::Release);
+            dbg!();
+            print_cap(self.producer.head.get());
+            print_cap(*self.producer.head.get());
+            let ptr = *self.producer.head.get();
+            (*ptr).next.store(n, Ordering::Relaxed);
+            dbg!();
+            print_cap(self.producer.head.get());
+            print_cap(*self.producer.head.get());
             *(&self.producer.head).get() = n;
+            print_cap(self.producer.head.get());
+            print_cap(*self.producer.head.get());
+            dbg!();
         }
     }
 
     unsafe fn alloc(&self) -> *mut Node<T> {
         // First try to see if we can consume the 'first' node for our uses.
         if *self.producer.first.get() != *self.producer.tail_copy.get() {
+            dbg!("consume first node");
+
             let ret = *self.producer.first.get();
             *self.producer.0.first.get() = (*ret).next.load(Ordering::Relaxed);
             return ret;
@@ -146,12 +202,15 @@ impl<T, ProducerAddition, ConsumerAddition> Queue<T, ProducerAddition, ConsumerA
         // again.
         *self.producer.0.tail_copy.get() = self.consumer.tail_prev.load(Ordering::Acquire);
         if *self.producer.first.get() != *self.producer.tail_copy.get() {
+            dbg!("updated our copy of tail - try again");
+
             let ret = *self.producer.first.get();
             *self.producer.0.first.get() = (*ret).next.load(Ordering::Relaxed);
             return ret;
         }
         // If all of that fails, then we have to allocate a new node
         // (there's nothing in the node cache).
+        dbg!("no cache, everything failed, allocate a new node");
         Node::new()
     }
 
